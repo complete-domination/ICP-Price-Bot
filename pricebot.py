@@ -3,10 +3,12 @@ import aiohttp
 import asyncio
 import os
 
-# Env vars
+# --- Env ---
 TOKEN = os.environ.get('TOKEN')
 GUILD_ID = os.environ.get('GUILD_ID')  # optional; if unset, updates all guilds
-COIN = "internet-computer"  # ✅ ICP CoinGecko ID
+
+# ✅ ICP from CoinGecko
+COIN = "internet-computer"
 
 if not TOKEN:
     raise SystemExit("Missing env var TOKEN")
@@ -16,7 +18,7 @@ if GUILD_ID:
     except ValueError:
         raise SystemExit("GUILD_ID must be an integer")
 
-# Intents
+# --- Discord client ---
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True  # also enable "Server Members Intent" in the Dev Portal
@@ -24,7 +26,7 @@ client = discord.Client(intents=intents)
 
 update_task = None
 
-# ---- Price fetcher ----
+# --- Fetch ICP price & 24h change ---
 async def get_price_data():
     url = f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={COIN}"
     timeout = aiohttp.ClientTimeout(total=10)
@@ -37,7 +39,7 @@ async def get_price_data():
             change_24h = data[0]['price_change_percentage_24h']
             return price, change_24h
 
-# ---- Per-guild update ----
+# --- Update one guild (nickname + presence) ---
 async def update_guild(guild: discord.Guild):
     try:
         me = guild.me or await guild.fetch_member(client.user.id)
@@ -58,40 +60,40 @@ async def update_guild(guild: discord.Guild):
 
     emoji = "🟢" if change_24h >= 0 else "🔴"
 
-    # Nickname: only price + emoji
+    # 👇 Nickname like: "$3.25 🟢"
     nickname = f"${price:.2f} {emoji}"
     if len(nickname) > 32:
         nickname = nickname[:32]
 
     try:
         await me.edit(nick=nickname, reason="Auto price update")
-        # Presence underneath name: 24h change
+
+        # 👇 Presence under the name like: "24h change +52.04%"
         await client.change_presence(activity=discord.Game(name=f"24h change {change_24h:+.2f}%"))
-        print(f"[{guild.name}] Nick → {nickname}, presence → {change_24h:+.2f}%")
+
+        print(f"[{guild.name}] Nick → {nickname} | Presence → {change_24h:+.2f}%")
     except discord.Forbidden:
         print(f"[{guild.name}] Forbidden: role hierarchy/permissions block nickname change.")
     except discord.HTTPException as e:
         print(f"[{guild.name}] HTTP error updating nick: {e}")
 
-# ---- Main loop ----
+# --- Loop ---
 async def updater_loop():
     await client.wait_until_ready()
     while not client.is_closed():
         try:
-            target_guilds = []
+            targets = []
             if GUILD_ID:
                 g = client.get_guild(GUILD_ID)
-                if g:
-                    target_guilds = [g]
-                else:
-                    print("Configured GUILD_ID not found.")
+                if g: targets = [g]
+                else: print("Configured GUILD_ID not found.")
             else:
-                target_guilds = list(client.guilds)
+                targets = list(client.guilds)
 
-            if not target_guilds:
-                print("No guilds found.")
+            if targets:
+                await asyncio.gather(*(update_guild(g) for g in targets))
             else:
-                await asyncio.gather(*(update_guild(g) for g in target_guilds))
+                print("No guilds found to update.")
         except Exception as e:
             print(f"Updater loop error: {e}")
 
